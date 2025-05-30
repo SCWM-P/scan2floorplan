@@ -1,0 +1,7 @@
+/utils/pcd_viewer/
+/utils/ultralytics/
+/data/**/*.txt
+/data/**/*.obj
+/data/**/*.mtl
+/.idea/
+/__pycache__/

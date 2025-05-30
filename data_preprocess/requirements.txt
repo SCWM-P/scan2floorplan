@@ -1,0 +1,16 @@
+numpy
+scipy
+matplotlib
+Pillow
+opencv-python
+trimesh
+open3d
+pyvista
+ifcopenshell
+scikit-learn
+scikit-image
+tqdm
+pandas
+seaborn
+jupyter
+ipykernel

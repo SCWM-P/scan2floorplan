@@ -1,0 +1,29 @@
+name: scan2floorplan
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+  - numpy
+  - scipy
+  - matplotlib
+  - pillow
+  - opencv
+  - pytorch
+  - torchvision
+  - cudatoolkit=11.3
+  - pip:
+    - trimesh
+    - open3d
+    - pyvista
+    - ifcopenshell
+    - python-ifc
+    - scikit-learn
+    - scikit-image
+    - tqdm
+    - pandas
+    - seaborn
+    - jupyter
+    - ipykernel 

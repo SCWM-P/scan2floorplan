@@ -1,0 +1,5 @@
+file_mapping.json
+因为ifc/obj/obj_fill_wall等中相应的命名和point cloud中的命名不一致，因此需要将命名的对应关系建立起来
+create_file_mapping.json
+为了生成file_mapping.json而有的一个python文件
+ifc_reader.py，就是写来阅读ifc文件的
