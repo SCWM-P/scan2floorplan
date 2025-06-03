@@ -70,16 +70,12 @@ def calculate_bounds(points_list: List[np.ndarray]) -> Tuple[float, float, float
     x_max = float('-inf')
     z_min = float('inf')
     z_max = float('-inf')
-    
-    for points in points_list:
-        if len(points) == 0:
-            continue
-        x_min = min(x_min, np.min(points[:, 0]))
-        x_max = max(x_max, np.max(points[:, 0]))
-        z_min = min(z_min, np.min(points[:, 2]))
-        z_max = max(z_max, np.max(points[:, 2]))
+    points_list_concat = np.concat(points_list, axis=0)
+    x_min, _, z_min = np.min(points_list_concat, axis=0)
+    x_max, _, z_max = np.max(points_list_concat, axis=0)
     
     return x_min, x_max, z_min, z_max
+
 
 def create_canvas(x_min: float, x_max: float, z_min: float, z_max: float) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -95,12 +91,10 @@ def create_canvas(x_min: float, x_max: float, z_min: float, z_max: float) -> Tup
     width = x_max - x_min
     height = z_max - z_min
     scale = max(2048 / width, 2048 / height)  # 将10240改回1024
-    
     # 计算画布尺寸
     canvas_width = int(width * scale)
     canvas_height = int(height * scale)
     canvas = np.ones((canvas_height, canvas_width, 3), dtype=np.uint8) * 255
-    
     # 计算变换矩阵
     # 变换矩阵将实际坐标映射到画布坐标
     T1 = np.array([
@@ -130,10 +124,8 @@ def project_points(points: np.ndarray, T1: np.ndarray) -> np.ndarray:
 def get_convex_hull(points_2d: np.ndarray) -> np.ndarray:
     """
     计算二维点的凸包
-    
     Args:
         points_2d (np.ndarray): 二维点集
-        
     Returns:
         np.ndarray: 凸包顶点
     """

@@ -54,7 +54,7 @@ def get_transform_matrix_path(point_cloud_path: str) -> Optional[str]:
     """
     try:
         # 加载文件映射
-        with open('data_preprocess/file_mapping.json', 'r') as f:
+        with open('../data_preprocess/file_mapping.json', 'r') as f:
             mapping = json.load(f)
         
         # 获取点云文件名
@@ -509,9 +509,9 @@ def main():
     主函数
     """
     # 示例用法
-    pcd_path = "data/raw/BIMNet/point_cloud/train/1pXnuDYAj8r.txt"  # 输入点云文件
-    intersection_file = "data_preprocess/tmp.txt"  # IFC交点文件
-    output_dir = "data_preprocess/output"  # 输出目录
+    pcd_path = "../data/raw/BIMNet/point_cloud/train/1pXnuDYAj8r.txt"  # 输入点云文件
+    intersection_file = "tmp.txt"  # IFC交点文件
+    output_dir = "output"  # 输出目录
     
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)

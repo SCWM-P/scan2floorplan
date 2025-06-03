@@ -237,7 +237,6 @@ class IFCReader:
                 for i in range(len(faces)):
                     if i in used_faces:
                         continue
-                    
                     group = [i]
                     used_faces.add(i)
                     

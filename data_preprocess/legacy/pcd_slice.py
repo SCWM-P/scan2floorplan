@@ -157,7 +157,6 @@ def process_slice(pcd: o3d.geometry.PointCloud, height: float, thickness: float,
         height (float): 切片起始高度
         thickness (float): 切片厚度
         output_path (str): 输出图像路径
-        
     Returns:
         bool: 是否处理成功
     """
@@ -176,18 +175,14 @@ def process_slice(pcd: o3d.geometry.PointCloud, height: float, thickness: float,
         
         # 创建画布和变换矩阵
         canvas, T1 = create_canvas(x_min, x_max, z_min, z_max)
-        
         # 投影点
         projected_points = project_points(points, T1)
-        
         # 绘制点
         draw_points(canvas, projected_points)
-        
         # 保存图像
         cv2.imwrite(output_path, canvas)
         print(f"切片图像已保存到: {output_path}")
         return True
-        
     except Exception as e:
         print(f"处理切片时出错: {e}")
         return False
@@ -225,10 +220,8 @@ def load_transform_matrix(file_path: str) -> Optional[np.ndarray]:
 def get_transform_matrix_path(point_cloud_path: str) -> Optional[str]:
     """
     根据点云文件路径获取对应的变换矩阵文件路径
-    
     Args:
         point_cloud_path (str): 点云文件路径
-        
     Returns:
         Optional[str]: 变换矩阵文件路径，如果失败则返回None
     """
@@ -246,11 +239,9 @@ def get_transform_matrix_path(point_cloud_path: str) -> Optional[str]:
             if pc == pc_filename:
                 ifc_filename = ifc
                 break
-        
         if ifc_filename is None:
             print(f"警告: 未找到点云文件 {pc_filename} 对应的IFC文件")
             return None
-        
         # 构建变换矩阵文件路径
         # 从点云路径中提取train/test目录
         path_parts = Path(point_cloud_path).parts
@@ -259,11 +250,9 @@ def get_transform_matrix_path(point_cloud_path: str) -> Optional[str]:
             if part in ['train', 'test']:
                 train_test_dir = part
                 break
-        
         if train_test_dir is None:
             print(f"警告: 无法从路径中识别train/test目录: {point_cloud_path}")
             return None
-        
         # 构建变换矩阵文件路径
         # point_cloud和mat_pc2obj是同级目录
         transform_path = os.path.join(
@@ -272,11 +261,9 @@ def get_transform_matrix_path(point_cloud_path: str) -> Optional[str]:
             train_test_dir,  # 进入对应的train/test目录
             ifc_filename.replace('.ifc', '.txt')  # 替换文件扩展名
         )
-        
         # 打印调试信息
         print(f"点云文件路径: {point_cloud_path}")
         print(f"变换矩阵文件路径: {transform_path}")
-        
         return transform_path
     except Exception as e:
         print(f"获取变换矩阵路径出错: {e}")
@@ -285,7 +272,6 @@ def get_transform_matrix_path(point_cloud_path: str) -> Optional[str]:
 def load_BIMNet_point_cloud(file_path: str) -> Optional[o3d.geometry.PointCloud]:
     """
     加载BIMNet格式的点云文件并应用变换矩阵
-    
     Args:
         file_path (str): 点云文件路径
         
@@ -296,7 +282,6 @@ def load_BIMNet_point_cloud(file_path: str) -> Optional[o3d.geometry.PointCloud]
         # 读取txt文件
         with open(file_path, 'r') as f:
             lines = f.readlines()
-        
         # 解析每一行
         points = []
         colors = []
@@ -305,37 +290,29 @@ def load_BIMNet_point_cloud(file_path: str) -> Optional[o3d.geometry.PointCloud]
             values = line.strip().split()
             if len(values) < 6:  # 至少需要6个值（x,y,z,r,g,b）
                 continue
-                
             # 提取坐标和颜色
             x, y, z = float(values[0]), float(values[1]), float(values[2])
             r, g, b = float(values[3]), float(values[4]), float(values[5])
-            
             points.append([x, y, z])
             colors.append([r, g, b])
-        
         if not points:
             print(f"警告: 文件不包含有效点: {file_path}")
             return None
-        
         # 创建点云
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)
-        
         # 加载并应用变换矩阵
         transform_path = get_transform_matrix_path(file_path)
         if transform_path is None:
             print(f"警告: 无法获取变换矩阵路径")
             return None
-        
         transform_matrix = load_transform_matrix(transform_path)
         if transform_matrix is None:
             print(f"警告: 无法加载变换矩阵")
             return None
-            
         # 应用变换
         pcd.transform(transform_matrix)
-        
         return pcd
     except Exception as e:
         print(f"加载BIMNet点云文件出错: {e}")
@@ -347,19 +324,15 @@ if __name__ == "__main__":
     output_dir = "data_preprocess/output"     # 输出目录
     height = 2.3             # 切片起始高度（米）
     thickness = 0.05         # 切片厚度（米）
-    
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
-    
     # 加载点云
     pcd = load_BIMNet_point_cloud(input_file)  # 使用新的加载函数
     if pcd is None:
         print("无法加载点云文件")
         exit(1)
-    
     # 处理切片并生成图像
     output_path = os.path.join(output_dir, f"slice_{height:.2f}m_{thickness:.2f}m.png")
     success = process_slice(pcd, height, thickness, output_path)
-    
     if not success:
         print("处理切片失败") 
