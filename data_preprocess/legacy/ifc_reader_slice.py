@@ -238,7 +238,6 @@ class IFCReader:
                     group_edges.append((min(face[0], face[1]), max(face[0], face[1])))
                     group_edges.append((min(face[1], face[2]), max(face[1], face[2])))
                     group_edges.append((min(face[2], face[0]), max(face[2], face[0])))
-
                 # 统计组内每条边的出现次数
                 edge_counts = {}
                 for edge in group_edges:
@@ -247,7 +246,6 @@ class IFCReader:
                 unique_edges = [edge for edge, count in edge_counts.items() if count == 1]
                 all_edges.extend(unique_edges)
             return all_edges
-
         for geometry in self.geometries:
             if geometry.vertices is None or geometry.faces is None:
                 continue
@@ -263,16 +261,13 @@ class IFCReader:
             vertices = geometry.vertices[unique_indices]
             # 更新面片中的顶点索引
             faces = inverse_indices[geometry.faces]
-
             # 合并共面三角面片
             # 获取合并后的边界边
             boundary_edges = merge_coplanar_faces(vertices, faces)
-            
             # 计算切片交点
             intersections = []
             for edge in boundary_edges:
                 v1, v2 = vertices[edge[0]], vertices[edge[1]]
-                
                 # 检查边是否与切片平面相交
                 if abs(v1[1] - v2[1]) < 1e-6:  # 边与平面平行
                     if abs(v1[1] - height) < 1e-6:  # 边在切片平面上
@@ -371,7 +366,6 @@ if __name__ == "__main__":
     
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(f"处理了 {len(components)} 个IFC构件\n\n")
-        
         for i, comp in enumerate(components):
             try:
                 # 计算切片交点
@@ -390,9 +384,11 @@ if __name__ == "__main__":
                     for i, intersection in enumerate(slice_intersection, 1):
                         f.write(f"几何体 No.{i}:\n")
                         # 格式化输出，确保所有数值都显示4位小数
-                        formatted_points = np.array2string(intersection, 
-                                                         formatter={'float_kind': lambda x: f"{x:.4f}"},
-                                                         separator=', ')
+                        formatted_points = np.array2string(
+                            intersection,
+                            formatter={'float_kind': lambda x: f"{x:.4f}"},
+                            separator=', '
+                        )
                         f.write(f"{formatted_points}\n")
                     f.write("\n")
             except Exception as e:

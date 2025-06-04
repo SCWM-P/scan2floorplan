@@ -1,13 +1,10 @@
 # data_preprocess/core/data_manager.py
 import json
-import numpy as np
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Optional, Tuple, Dict, List
+
 
 class DataManager:
-    """
-    管理BIMNet数据集的文件路径、映射关系和输出YOLO数据集的结构。
-    """
     def __init__(self, bimnet_root_dir: Path, output_yolo_dir: Path, mapping_file: Path):
         self.bimnet_root_dir = bimnet_root_dir
         self.output_yolo_dir = output_yolo_dir
@@ -18,59 +15,87 @@ class DataManager:
         if not self.mapping_file.exists():
             raise FileNotFoundError(f"File mapping JSON not found: {self.mapping_file}")
         with open(self.mapping_file, 'r') as f:
-            self._file_mapping = json.load(f)
+            self.file_mapping = json.load(f)
+
         self.output_yolo_dir.mkdir(parents=True, exist_ok=True)
+        for split in ["train", "val", "test"]:
+            (self.output_yolo_dir / split / "images").mkdir(parents=True, exist_ok=True)
+            (self.output_yolo_dir / split / "labels").mkdir(parents=True, exist_ok=True)
 
-    def get_ifc_scenes(self, split: str = 'train') -> List[str]:
-        """获取指定split下的所有IFC场景名称 (不含.ifc后缀)"""
-        ifc_dir = self.bimnet_root_dir / "ifc" / split
-        if not ifc_dir.exists():
-            return []
-        return sorted([f.stem for f in ifc_dir.glob("*.ifc")])
-
-    def get_pcd_filename_for_ifc_scene(self, ifc_scene_name_with_ext: str) -> Optional[str]:
-        """根据IFC文件名 (带扩展名) 获取对应的点云文件名。"""
-        return self._file_mapping.get(ifc_scene_name_with_ext)
+    def get_ifc_path(self, ifc_scene_name: str, split: str = 'train') -> Path:
+        """获取IFC文件的完整路径 (e.g., 1px.ifc)"""
+        if not ifc_scene_name.endswith(".ifc"):
+            ifc_scene_name += ".ifc"
+        path = self.bimnet_root_dir / "ifc" / split / ifc_scene_name
+        if not path.exists():
+            raise FileNotFoundError(f"IFC file not found for scene {ifc_scene_name} in split {split} at {path}")
+        return path
 
     def get_pcd_path_for_ifc_scene(self, ifc_scene_name: str, split: str = 'train') -> Optional[Path]:
-        """根据IFC场景名 (不带扩展名) 和split获取点云文件完整路径。"""
-        ifc_filename_with_ext = f"{ifc_scene_name}.ifc"
-        pcd_filename = self.get_pcd_filename_for_ifc_scene(ifc_filename_with_ext)
-        if pcd_filename:
-            return self.bimnet_root_dir / "point_cloud" / split / pcd_filename
-        return None
+        """根据IFC场景名获取对应的点云文件路径。"""
+        ifc_base_name = ifc_scene_name.replace(".ifc", "")
+        # 在file_mapping中查找匹配的ifc文件名
+        # file_mapping.json的key是ifc文件名，value是点云文件名
+        # 例如: "1px.ifc": "1pXnuDYAj8r.txt"
+        pcd_filename = None
+        for ifc_key, pc_val in self.file_mapping.items():
+            if ifc_key.startswith(ifc_base_name) and ifc_key.endswith(".ifc"):  # 处理可能带楼层后缀的情况，如 "7y3_1.ifc"
+                pcd_filename = pc_val
+                break
 
-    def get_obj_component_dir_for_ifc_scene(self, ifc_scene_name: str, split: str = 'train') -> Path:
-        """获取IFC场景对应的OBJ构件存放目录。"""
-        # BIMNet中，OBJ文件通常存储在以IFC文件名（不含扩展名）命名的子目录中
-        # 例如： data/raw/BIMNet/obj/train/1px/ 存放 1px.ifc 对应的所有构件OBJ
-        return self.bimnet_root_dir / "obj" / split / ifc_scene_name
+        if not pcd_filename:
+            # 尝试直接用ifc文件名（不含.ifc）去匹配点云文件名中的一部分
+            for pc_val in self.file_mapping.values():
+                if ifc_base_name in pc_val:
+                    pcd_filename = pc_val
+                    break
 
-    def get_transform_matrix_path_for_ifc_scene(self, ifc_scene_name: str, split: str = 'train') -> Optional[Path]:
-        """获取IFC场景对应的点云到OBJ坐标系的变换矩阵文件路径。"""
-        # 变换矩阵文件名与IFC文件名一致，扩展名为.txt
-        # 例如: data/raw/BIMNet/mat_pc2obj/train/1px.txt
-        transform_file = self.bimnet_root_dir / "mat_pc2obj" / split / f"{ifc_scene_name}.txt"
-        return transform_file if transform_file.exists() else None
-
-    def get_output_image_path(self, base_name: str, slice_height_str: str, split: str = 'train') -> Path:
-        """获取生成的YOLO图像的输出路径。"""
-        image_dir = self.output_yolo_dir / split / "images"
-        image_dir.mkdir(parents=True, exist_ok=True)
-        return image_dir / f"{base_name}_slice_{slice_height_str}.png" # 或 .jpg
-
-    def get_output_label_path(self, base_name: str, slice_height_str: str, split: str = 'train') -> Path:
-        """获取生成的YOLO标签文件的输出路径。"""
-        label_dir = self.output_yolo_dir / split / "labels"
-        label_dir.mkdir(parents=True, exist_ok=True)
-        return label_dir / f"{base_name}_slice_{slice_height_str}.txt"
-
-    def load_transform_matrix(self, matrix_path: Path) -> Optional[np.ndarray]:
-        """加载4x4变换矩阵。"""
-        if not matrix_path or not matrix_path.exists():
+        if not pcd_filename:
+            print(f"Warning: No PCD file mapping found for IFC scene {ifc_scene_name} in {self.mapping_file}")
             return None
-        try:
-            return np.loadtxt(matrix_path, dtype=np.float32)
-        except Exception as e:
-            print(f"Error loading transformation matrix {matrix_path}: {e}")
-            return None
+        path = self.bimnet_root_dir / "point_cloud" / split / pcd_filename
+        if not path.exists():
+            # 尝试在另一个split中查找（BIMNet的train/test划分可能不一致）
+            other_split = 'test' if split == 'train' else 'train'
+            path_other = self.bimnet_root_dir / "point_cloud" / other_split / pcd_filename
+            if path_other.exists():
+                path = path_other
+            else:
+                print(f"Warning: PCD file not found for IFC scene {ifc_scene_name} at {path} or {path_other}")
+                return None
+        return path
+
+    def get_transform_matrix_for_ifc_scene(self, ifc_scene_name: str, split: str = 'train') -> Optional[Path]:
+        """根据IFC场景名获取对应的mat_pc2obj变换矩阵文件路径。"""
+        # mat_pc2obj 文件名通常与 IFC 文件名（去除.ifc后缀）一致，但扩展名为.txt
+        # 例如, 1px.ifc -> 1px.txt
+        matrix_filename = ifc_scene_name.replace(".ifc", ".txt")
+        path = self.bimnet_root_dir / "mat_pc2obj" / split / matrix_filename
+        if not path.exists():
+            # 尝试在另一个split中查找
+            other_split = 'test' if split == 'train' else 'train'
+            path_other = self.bimnet_root_dir / "mat_pc2obj" / other_split / matrix_filename
+            if path_other.exists():
+                path = path_other
+            else:
+                print(
+                    f"Warning: Transform matrix file not found for IFC scene {ifc_scene_name} at {path} or {path_other}")
+                return None
+        return path
+
+    def get_scene_names(self, split: str = 'train') -> List[str]:
+        """获取指定split下的所有IFC场景文件名（不含路径，含.ifc后缀）。"""
+        ifc_dir = self.bimnet_root_dir / "ifc" / split
+        if not ifc_dir.is_dir():
+            return []
+        return [f.name for f in ifc_dir.glob("*.ifc")]
+
+    def get_output_image_path(self, base_name: str, split: str = 'train', slice_level_str: str = "") -> Path:
+        """获取输出图像的保存路径。base_name 通常是 ifc_scene_name_without_extension + slice_info"""
+        filename = f"{base_name}{slice_level_str}.png"  # 统一用png
+        return self.output_yolo_dir / split / "images" / filename
+
+    def get_output_label_path(self, base_name: str, split: str = 'train', slice_level_str: str = "") -> Path:
+        """获取输出YOLO标签文件的保存路径。"""
+        filename = f"{base_name}{slice_level_str}.txt"
+        return self.output_yolo_dir / split / "labels" / filename

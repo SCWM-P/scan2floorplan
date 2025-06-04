@@ -8,6 +8,7 @@
 import trimesh
 import numpy as np
 import os
+from pathlib import Path
 from typing import Tuple, List, Dict, Optional
 
 class IFCReader:
@@ -221,15 +222,12 @@ class IFCReader:
                     normal = normal / norm
                     face_normals.append(normal)
                     valid_faces.append(i)
-                
                 # 如果没有有效的面，返回空列表
                 if not valid_faces:
                     return []
-                
                 # 更新面片索引
                 faces = faces[valid_faces]
                 face_normals = np.array(face_normals)
-                
                 # 找出共面的面片
                 coplanar_groups = []
                 used_faces = set()
@@ -367,11 +365,10 @@ if __name__ == "__main__":
     ]
     
     # 处理文件夹下的所有IFC构件
-    folder_path = "/home/zt/project/scan2floorplan/data/raw/BIMNet/obj/train/1px"
+    project_root = Path(__file__).resolve().parent.parent.parent
+    folder_path = project_root / "data/raw/BIMNet/obj/train/1px"
     components = reader.process_ifc_components(folder_path)
-    
-    # 准备保存的数据
-    output_path = "/home/zt/project/scan2floorplan/data_preprocess/tmp.txt"
+    output_path = project_root / "data_preprocess/tmp.txt"
     valid_components = 0  # 统计有角点的构件数量
     filtered_components = 0  # 统计符合IFC类型的构件数量
     

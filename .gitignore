@@ -3,5 +3,7 @@
 /data/**/*.txt
 /data/**/*.obj
 /data/**/*.mtl
+/data/**/*.ifc
+/data/**/*.json
 /.idea/
 /__pycache__/

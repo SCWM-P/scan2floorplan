@@ -2,175 +2,160 @@
 import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple
-import cv2  # For image generation from points
+from .geometry_processor import GeometryProcessor
+import cv2  # For image operations if needed
 
 
 class PointCloudProcessor:
-    """处理点云数据的加载、切片和2D投影。"""
-
     def __init__(self, pcd_file_path: Path):
         self.pcd_file_path = pcd_file_path
         if not self.pcd_file_path.exists():
             raise FileNotFoundError(f"Point cloud file not found: {self.pcd_file_path}")
 
-    def load_pcd_bimnet(self) -> Optional[np.ndarray]:
+    def load_pcd(self, y_is_up: bool = True) -> Optional[np.ndarray]:
         """
-        加载BIMNet格式的点云 (.txt, x y z r g b label)。
-        返回 Nx6 的 numpy 数组 (x, y, z, r, g, b)。标签被丢弃。
-        **重要：假设BIMNet点云文件中的坐标已经是Y轴朝上，如果不是，需要在此处或加载后进行转换。**
-        根据BIMNet data_organization.md, 点云已经是 x y z r g b label, Y是高度。
-        所以，如果 mat_pc2obj 是将原始扫描（可能Z朝上）转到这个Y朝上的OBJ坐标系，那么这里直接用就好。
+        Loads a point cloud from a .txt file (BIMNet format: x y z r g b label).
+        Args:
+            y_is_up (bool): If True, assumes input Z is height and converts to Y-up.
+                            If False, assumes input Y is already height.
+        Returns:
+            Optional[np.ndarray]: Point cloud as NxK array (K>=3 for XYZ), or None if loading fails.
+                                   Coordinates are ensured to be Y-up.
         """
         try:
-            # BIMNet点云是 x y z r g b label (7列)
-            # 我们通常只需要 x, y, z, r, g, b (6列)
-            data = np.loadtxt(str(self.pcd_file_path), dtype=np.float32, usecols=(0, 1, 2, 3, 4, 5))
-            return data
+            # BIMNet .txt format: x y z r g b label (here z is height)
+            data = np.loadtxt(str(self.pcd_file_path))
+            if data.ndim == 1:  # Handle case with only one point
+                data = data.reshape(1, -1)
+
+            if data.shape[1] < 3:
+                print(f"Error: Point cloud file {self.pcd_file_path} has fewer than 3 coordinate columns.")
+                return None
+
+            points_xyz = data[:, :3]
+            colors_rgb = data[:, 3:6] / 255.0 if data.shape[1] >= 6 else None
+            # semantic_labels = data[:, 6] if data.shape[1] >= 7 else None # Not used directly for background generation
+
+            if y_is_up:  # Original BIMNet has Z as height
+                points_y_up = np.stack((points_xyz[:, 0], points_xyz[:, 2], points_xyz[:, 1]), axis=-1)
+            else:  # Assume Y is already up, or input is already in desired Y-up convention
+                points_y_up = points_xyz
+
+            # For now, just return points. Colors/labels can be added if needed by image_annotator
+            return points_y_up
+
         except Exception as e:
-            print(f"Error loading BIMNet point cloud {self.pcd_file_path}: {e}")
+            print(f"Error loading point cloud {self.pcd_file_path}: {e}")
             return None
 
-    def apply_transform(self, points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-        """应用4x4变换矩阵到点云 (Nx3 or Nx6)"""
-        if points.shape[1] < 3:
-            raise ValueError("Points must have at least 3 columns (x,y,z)")
+    @staticmethod
+    def apply_transform(points_3d: np.ndarray, transform_matrix: np.ndarray) -> np.ndarray:
+        """Applies a 4x4 transformation matrix to 3D points."""
+        return GeometryProcessor.transform_points(points_3d, transform_matrix)
 
-        coords = points[:, :3]
-        if coords.shape[1] == 3:
-            coords_h = np.hstack((coords, np.ones((coords.shape[0], 1), dtype=coords.dtype)))
-        else:  # Should not happen if points are Nx3
-            coords_h = coords
-
-        transformed_coords_h = coords_h @ matrix.T
-        transformed_coords = transformed_coords_h[:, :3] / transformed_coords_h[:, 3, np.newaxis]
-
-        # 如果原始点云包含颜色等信息，则保留它们
-        if points.shape[1] > 3:
-            return np.hstack((transformed_coords, points[:, 3:]))
-        else:
-            return transformed_coords
-
-    def slice_pcd_at_y(self, points_xyz_rgb: np.ndarray, slice_y_level: float, slice_thickness: float) -> Optional[
-        np.ndarray]:
+    @staticmethod
+    def slice_pcd_at_y(
+            points_3d_y_up: np.ndarray,
+            slice_y_level: float,
+            slice_thickness: float
+    ) -> Optional[np.ndarray]:
         """
-        对点云在指定Y高度进行切片。
+        Slices 3D points around a given Y level with a certain thickness.
+        Assumes points_3d_y_up already has Y as the height axis.
         Args:
-            points_xyz_rgb (np.ndarray): Nx6 点云数据 (x, y, z, r, g, b)。Y是高度轴。
-            slice_y_level (float): 切片中心Y坐标。
-            slice_thickness (float): 切片厚度。
+            points_3d_y_up (np.ndarray): Array of 3D points (Nx3), Y is height.
+            slice_y_level (float): The Y coordinate for the center of the slice.
+            slice_thickness (float): The thickness of the slice.
         Returns:
-            Optional[np.ndarray]: 切片后的点云 (x, y, z, r, g, b)，如果无点则返回None。
+            Optional[np.ndarray]: Points within the slice (Mx3), or None.
         """
-        if points_xyz_rgb is None or points_xyz_rgb.shape[0] == 0:
+        if points_3d_y_up.shape[0] == 0:
             return None
 
-        y_coords = points_xyz_rgb[:, 1]  # Y是高度
-        mask = (y_coords >= (slice_y_level - slice_thickness / 2)) & \
-               (y_coords <= (slice_y_level + slice_thickness / 2))
+        y_coords = points_3d_y_up[:, 1]
+        half_thickness = slice_thickness / 2.0
+        mask = (y_coords >= slice_y_level - half_thickness) & \
+               (y_coords <= slice_y_level + half_thickness)
 
-        sliced_points = points_xyz_rgb[mask]
+        sliced_points = points_3d_y_up[mask]
         return sliced_points if sliced_points.shape[0] > 0 else None
 
-    def project_pcd_to_top_down_image(
-            self,
-            points_xyz_rgb: np.ndarray,  # 应该是切片后的点云，或者需要投影的3D点
-            image_wh: Tuple[int, int],
-            world_bounds_xz: Tuple[float, float, float, float],  # (x_min, z_min, x_max, z_max)
-            point_size: int = 1,
-            use_density: bool = False,  # True则生成密度图，False则用点云颜色
-            default_color: Tuple[int, int, int] = (0, 0, 0)  # BGR
-    ) -> np.ndarray:
+    @staticmethod
+    def project_pcd_to_image_plane(
+            points_3d_slice_y_up: np.ndarray,  # Points already sliced and Y-up
+            image_wh: Tuple[int, int],  # Target image (width, height)
+            world_bounds_xz: Tuple[float, float, float, float],
+            # (x_min, z_min, x_max, z_max) of the world area to render
+            density_radius_world: float = 0.05,  # Radius in world units to consider for density
+            min_points_for_pixel: int = 1  # Minimum points in radius to color a pixel
+    ) -> Optional[np.ndarray]:
         """
-        将点云（通常是切片后的）的XZ坐标投影到2D图像上。
-
+        Projects sliced 3D points (Y-up) onto the XZ plane to generate a 2D density image.
         Args:
-            points_xyz_rgb (np.ndarray): Nx6 点云数据 (x, y, z, r, g, b)。Y是高度轴。
-            image_wh (Tuple[int, int]): 输出图像的 (宽度, 高度)。
-            world_bounds_xz (Tuple[float, float, float, float]): 点云在世界坐标系中的XZ平面边界 (x_min, z_min, x_max, z_max)。
-                                                             用于计算缩放和平移。
-            point_size (int): 绘制点的半径。
-            use_density (bool): 是否生成密度图而不是彩色点图。
-            default_color (Tuple[int,int,int]): 默认绘制点的颜色 (BGR)，如果use_density=False且点云无颜色时使用。
-
+            points_3d_slice_y_up (np.ndarray): Sliced 3D points (Nx3), Y is height. (X, Y_height, Z)
+            image_wh (Tuple[int, int]): Target image (width, height).
+            world_bounds_xz (Tuple[float, float, float, float]): (x_min, z_min, x_max, z_max) in world coordinates.
+            density_radius_world (float): Radius in world units to calculate point density.
+            min_points_for_pixel (int): Minimum number of points within density_radius_world to color a pixel.
         Returns:
-            np.ndarray: 生成的2D图像 (H, W, 3) in BGR format。
+            Optional[np.ndarray]: A 2D grayscale density image (height, width), or None.
         """
-        if points_xyz_rgb is None or points_xyz_rgb.shape[0] == 0:
-            return np.ones((image_wh[1], image_wh[0], 3), dtype=np.uint8) * 255  # White background
+        if points_3d_slice_y_up is None or points_3d_slice_y_up.shape[0] == 0:
+            return np.ones((image_wh[1], image_wh[0]), dtype=np.uint8) * 255  # White background
+
+        points_xz = points_3d_slice_y_up[:, [0, 2]]  # Extract (x, original_z) for projection
 
         img_w, img_h = image_wh
-        x_coords_world = points_xyz_rgb[:, 0]
-        z_coords_world = points_xyz_rgb[:, 2]
-
-        if points_xyz_rgb.shape[1] >= 6:  # 包含颜色信息
-            colors_rgb = points_xyz_rgb[:, 3:6]  # r,g,b
-        else:  # 没有颜色信息
-            colors_rgb = np.array([default_color[::-1]] * len(points_xyz_rgb))  # BGR to RGB
-
         x_min_world, z_min_world, x_max_world, z_max_world = world_bounds_xz
 
         world_width = x_max_world - x_min_world
         world_height = z_max_world - z_min_world
 
-        if world_width <= 0 or world_height <= 0:  # 避免除零
-            return np.ones((img_h, img_w, 3), dtype=np.uint8) * 255
+        if world_width <= 0 or world_height <= 0:
+            print("Warning: Invalid world_bounds_xz, width or height is zero or negative.")
+            return np.ones((img_h, img_w), dtype=np.uint8) * 255
 
         scale_x = img_w / world_width
-        scale_z = img_h / world_height
-        # 使用统一的比例因子，保持长宽比，取较小的那个，然后居中
-        scale = min(scale_x, scale_z)
+        scale_z = img_h / world_height  # Note: image height corresponds to Z world range
 
-        # 计算图像像素坐标
-        # (coord_world - min_world) * scale + offset_to_center
-        # 这里的投影方向：世界Z轴对应图像Y轴，世界X轴对应图像X轴
-        # 图像原点(0,0)在左上角
-        # 图像Y轴向下为正，图像X轴向右为正
-        # 世界Z轴正方向通常是“深入”屏幕，对应图像Y轴向下。世界X轴正方向是向右，对应图像X轴向右。
+        # Transform world XZ to image pixel coordinates (u, v)
+        # u = (x_world - x_min_world) * scale_x
+        # v = (z_world - z_min_world) * scale_z  --- for typical image origin top-left
+        # However, if image y-axis increases downwards:
+        # v = (z_max_world - z_world) * scale_z for inverted z-axis or
+        # v = (z_world - z_min_world) * scale_z (standard plot) and then flipud if needed.
+        # Let's assume standard plot: (0,0) at (x_min_world, z_min_world)
 
-        # 目标：将 (x_min_world, z_min_world) 映射到图像的某个位置 (如左上角或考虑边距)
-        #       将 (x_max_world, z_max_world) 映射到图像的某个位置 (如右下角或考虑边距)
+        pixel_coords_x = ((points_xz[:, 0] - x_min_world) * scale_x).astype(int)
+        pixel_coords_z_img_y = ((points_xz[:, 1] - z_min_world) * scale_z).astype(int)  # z_world maps to image y
 
-        # 新的图像画布尺寸，基于scale和world_width/height
-        new_img_w = int(world_width * scale)
-        new_img_h = int(world_height * scale)
+        # Create density image (grayscale, 0=black, 255=white)
+        # Initialize with white background
+        density_image = np.ones((img_h, img_w), dtype=np.uint8) * 255
 
-        # 偏移量，使得投影居中
-        offset_x = (img_w - new_img_w) / 2
-        offset_z = (img_h - new_img_h) / 2  # 对应图像y轴
+        # Filter points outside the image bounds
+        valid_mask = (pixel_coords_x >= 0) & (pixel_coords_x < img_w) & \
+                     (pixel_coords_z_img_y >= 0) & (pixel_coords_z_img_y < img_h)
 
-        # 转换到像素坐标 (相对于新图像区域的左上角)
-        x_pixel = ((x_coords_world - x_min_world) * scale + offset_x).astype(int)
-        # Z轴通常是深度，映射到图像的Y轴。Z值越大，图像Y值越大（向下）
-        z_pixel = ((z_coords_world - z_min_world) * scale + offset_z).astype(int)
+        pixel_coords_x_valid = pixel_coords_x[valid_mask]
+        pixel_coords_z_img_y_valid = pixel_coords_z_img_y[valid_mask]
 
-        if use_density:
-            density_map = np.zeros((img_h, img_w), dtype=np.float32)
-            valid_mask = (x_pixel >= 0) & (x_pixel < img_w) & (z_pixel >= 0) & (z_pixel < img_h)
-            valid_x_pixel = x_pixel[valid_mask]
-            valid_z_pixel = z_pixel[valid_mask]
+        # Simple projection: mark pixels that have any point
+        # A more advanced approach would be density/heatmap
+        if min_points_for_pixel <= 1:  # Direct projection if min_points is 1 or less
+            density_image[pixel_coords_z_img_y_valid, pixel_coords_x_valid] = 0  # Black for points
+        else:  # Density based coloring
+            # This is a simplified density. For a proper heatmap, use kernel density estimation
+            # or count points in a radius around each pixel center.
+            # The current `density_radius_world` isn't used in this simplified version.
+            # Let's implement a basic density count per pixel grid cell for now.
 
-            if len(valid_x_pixel) > 0:
-                # 使用histogram2d更高效地创建密度图
-                hist, _, _ = np.histogram2d(valid_z_pixel, valid_x_pixel, bins=[img_h, img_w],
-                                            range=[[0, img_h], [0, img_w]])
-                density_map = hist.astype(np.float32)
+            # Create an accumulator array
+            point_counts = np.zeros((img_h, img_w), dtype=int)
+            np.add.at(point_counts, (pixel_coords_z_img_y_valid, pixel_coords_x_valid), 1)
 
-            if np.max(density_map) > 0:
-                density_map = (density_map / np.max(density_map) * 255).astype(np.uint8)
+            # Color pixels where point count meets threshold
+            density_mask = point_counts >= min_points_for_pixel
+            density_image[density_mask] = 0  # Black for dense areas
 
-            # 将灰度密度图转换为BGR图像
-            image = cv2.cvtColor(density_map, cv2.COLOR_GRAY2BGR)
-            # 可以选择应用伪彩色
-            # image = cv2.applyColorMap(image, cv2.COLORMAP_JET)
-
-        else:  # 使用点云颜色
-            image = np.ones((img_h, img_w, 3), dtype=np.uint8) * 255  # White background
-
-            for i in range(len(x_pixel)):
-                px, pz = x_pixel[i], z_pixel[i]
-                if 0 <= px < img_w and 0 <= pz < img_h:
-                    # 点云颜色是R,G,B, OpenCV是B,G,R
-                    color_bgr = (int(colors_rgb[i, 2]), int(colors_rgb[i, 1]), int(colors_rgb[i, 0]))
-                    cv2.circle(image, (px, pz), radius=point_size, color=color_bgr, thickness=-1)
-
-        return image
+        return density_image
